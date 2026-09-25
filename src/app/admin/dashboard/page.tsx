@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { adminApi, ApiError, getToken, setToken, type MerchantStatus, type Store } from "@/lib/adminApi";
+import toast from "react-hot-toast";
 
 const money = (amount: number) => new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS" }).format(amount / 100);
 const date = (value: string) => new Intl.DateTimeFormat("en-GH", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
@@ -30,22 +31,22 @@ export default function AdminDashboardPage() {
     if (!getToken()) { router.replace("/admin/login"); return () => { alive = false; }; }
     Promise.all([adminApi.me(), adminApi.dashboard(), adminApi.stores({ page: 1, pageSize: 10 })]).then(([me, data, result]) => {
       if (!alive) return; setUser(me.admin); setStats(data); setStores(result.items); setTotal(result.total);
-    }).catch((e: unknown) => { if (!alive) return; setToken(null); setError(e instanceof Error ? e.message : "Could not load dashboard"); router.replace("/admin/login"); });
+    }).catch((e: unknown) => { if (!alive) return; const message = e instanceof Error ? e.message : "Could not load dashboard"; toast.error(message); setToken(null); setError(message); router.replace("/admin/login"); });
     return () => { alive = false; };
   }, [router]);
 
   useEffect(() => { if (!getToken()) return; let alive = true; adminApi.stores({ page, pageSize: 10, status: status === "ALL" ? undefined : status, search }).then((result) => { if (alive) { setStores(result.items); setTotal(result.total); } }).catch((e: unknown) => { if (alive) setError(e instanceof Error ? e.message : "Could not load stores"); }); return () => { alive = false; }; }, [page, status, search]);
 
-  async function signOut() { try { await adminApi.logout(); } catch { /* Local credentials are cleared even if the service is offline. */ } setToken(null); router.replace("/admin/login"); }
+  async function signOut() { try { await adminApi.logout(); } catch { /* Local credentials are cleared even if the service is offline. */ } setToken(null); toast.success("Signed out"); router.replace("/admin/login"); }
   async function toggleStore(store: Store) {
     let reason: string | undefined;
     if (store.status === "ACTIVE") { reason = window.prompt(`Why are you suspending ${store.storeName}?`)?.trim(); if (!reason || reason.length < 3) return; }
     setBusy(true); setError("");
-    try { await adminApi.setStoreStatus(store.id, store.status !== "ACTIVE", reason); await Promise.all([loadStores(), adminApi.dashboard().then(setStats)]); }
-    catch (e) { if (e instanceof ApiError && e.status === 401) { setToken(null); router.replace("/admin/login"); } else setError(e instanceof Error ? e.message : "Action failed"); }
+    try { await adminApi.setStoreStatus(store.id, store.status !== "ACTIVE", reason); await Promise.all([loadStores(), adminApi.dashboard().then(setStats)]); toast.success(store.status === "ACTIVE" ? "Store suspended" : "Store activated"); }
+    catch (e) { if (e instanceof ApiError && e.status === 401) { setToken(null); router.replace("/admin/login"); } else { const message = e instanceof Error ? e.message : "Action failed"; setError(message); toast.error(message); } }
     finally { setBusy(false); }
   }
-  async function exportCsv() { try { await adminApi.exportStores(); } catch (e) { setError(e instanceof Error ? e.message : "Export failed"); } }
+  async function exportCsv() { try { await adminApi.exportStores(); toast.success("Store export downloaded"); } catch (e) { const message = e instanceof Error ? e.message : "Export failed"; setError(message); toast.error(message); } }
 
   return <div className="admin-shell">
     <aside className="admin-rail"><a className="admin-brand" href="/admin/dashboard"><span className="admin-brand-mark">W</span><span>WhatsApp<span className="brand-accent">Mall</span><small>ADMIN CONSOLE</small></span></a><div className="rail-caption">WORKSPACE</div><a className="rail-link is-current" href="#overview"><span>◫</span> Overview</a><a className="rail-link" href="#stores"><span>▦</span> Stores</a><div className="rail-bottom"><span className="admin-avatar">{user?.name?.slice(0, 1).toUpperCase() ?? "A"}</span><span className="admin-user">{user?.name ?? "Administrator"}<small>{user?.email ?? "Platform admin"}</small></span><button className="icon-btn" aria-label="Sign out" title="Sign out" onClick={signOut}>↗</button></div></aside>
