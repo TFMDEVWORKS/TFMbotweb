@@ -1,0 +1,271 @@
+
+// WhatsApp Mall — Prisma schema
+// Multi-tenant model: one Merchant owns one Store; the Store sells Products;
+// Customers place Orders through the shared WhatsApp number; Payments cover
+// both customer orders and merchant monthly subscriptions.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+enum MerchantStatus {
+  PENDING 
+  ACTIVE
+  SUSPENDED 
+}
+
+enum SubscriptionPlan {
+  BASIC
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum OrderStatus {
+  CART 
+  PENDING_PAYMENT
+  PAID
+  PACKED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentPurpose {
+  ORDER
+  SUBSCRIPTION
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+}
+
+enum ConversationFlow {
+  MERCHANT_ONBOARDING
+  MERCHANT_ADD_PRODUCT
+  SHOPPING
+}
+
+model Merchant {
+  id             String         @id @default(cuid())
+  whatsappPhone  String         @unique
+  name           String
+  email          String?
+  passwordHash   String?        // set when they create a web login
+  status         MerchantStatus @default(PENDING)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  store          Store?
+  subscription   Subscription?
+
+  @@map("merchants")
+}
+
+model Store {
+  id              String    @id @default(cuid())
+  merchantId      String    @unique
+  merchant        Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  name            String
+  slug            String    @unique 
+  category        String 
+  description     String?
+  deliveryZones   String? 
+  deliveryFeeMinorUnits Int @default(0) 
+
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  products        Product[]
+  orders          Order[]
+
+  @@index([category])
+  @@map("stores")
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  name          String
+  description   String?
+  priceMinorUnits Int 
+  imageUrl      String?
+  isAvailable   Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  orderItems    OrderItem[]
+  images        ProductImage[]
+
+  @@index([storeId])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String   
+  position  Int      @default(0) 
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model Customer {
+  id            String   @id @default(cuid())
+  whatsappPhone String   @unique
+  name          String?
+  createdAt     DateTime @default(now())
+
+  orders        Order[]
+
+  @@map("customers")
+}
+
+model Order {
+  id                    String      @id @default(cuid())
+  storeId               String
+  store                 Store       @relation(fields: [storeId], references: [id])
+  customerId            String
+  customer              Customer    @relation(fields: [customerId], references: [id])
+
+  status                OrderStatus @default(CART)
+  deliveryAddress       String?
+  deliveryFeeMinorUnits Int         @default(0)
+  totalMinorUnits       Int         @default(0) 
+
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  paidAt                DateTime?
+
+  items                 OrderItem[]
+  payment               Payment?
+  receipt               Receipt?
+  statusEvents          OrderStatusEvent[]
+
+  @@index([storeId, status])
+  @@index([customerId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                String  @id @default(cuid())
+  orderId           String
+  order             Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product @relation(fields: [productId], references: [id])
+
+  quantity          Int
+  unitPriceMinorUnits Int 
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Payment {
+  id             String          @id @default(cuid())
+  provider       PaymentProvider @default(PAYSTACK)
+  reference      String          @unique 
+  purpose        PaymentPurpose
+  amountMinorUnits Int
+  status         PaymentStatus   @default(PENDING)
+
+  orderId        String?         @unique
+  order          Order?          @relation(fields: [orderId], references: [id])
+  subscriptionId String?
+  subscription   Subscription?   @relation(fields: [subscriptionId], references: [id])
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([subscriptionId])
+  @@map("payments")
+}
+
+model Subscription {
+  id                    String             @id @default(cuid())
+  merchantId            String             @unique
+  merchant              Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  plan                  SubscriptionPlan   @default(BASIC)
+  status                SubscriptionStatus @default(ACTIVE)
+  paystackSubscriptionCode String?         @unique
+  currentPeriodEnd      DateTime
+
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  payments              Payment[]
+
+  @@map("subscriptions")
+}
+
+model Receipt {
+  id            String   @id @default(cuid())
+  orderId       String   @unique
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  receiptNumber String   @unique 
+  pdfPath       String 
+  issuedAt      DateTime @default(now())
+
+  @@map("receipts")
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+
+  @@map("admin_users")
+}
+
+model OrderStatusEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  note      String?     // optional message from the seller, e.g. "Out for delivery via Bolt"
+  createdAt DateTime    @default(now())
+
+  @@index([orderId])
+  @@map("order_status_events")
+}
+
+model ConversationState {
+  id            String            @id @default(cuid())
+  whatsappPhone String            @unique
+  flow          ConversationFlow
+  step          String 
+  data          Json              @default("{}") // holds partial answers as they come in, e.g. { "storeName": "Ama's Fashion" }
+
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@map("conversation_states")
+}
