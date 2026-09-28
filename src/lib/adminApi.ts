@@ -62,6 +62,7 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly retryAfterSeconds?: number,
+    readonly issues: string[] = [],
   ) {
     super(message);
   }
@@ -102,13 +103,24 @@ async function request<T>(
   if (!response.ok || payload?.status !== "success") {
     const retry = Number(response.headers.get("retry-after"));
     const apiMessage = String(payload?.message ?? "");
+    const rawIssues = payload?.issues ?? payload?.errors ?? payload?.details?.issues ?? payload?.data?.issues;
+    const issues = Array.isArray(rawIssues)
+      ? rawIssues.map((issue: unknown) => {
+          if (typeof issue === "string") return issue;
+          if (issue && typeof issue === "object") {
+            const record = issue as Record<string, unknown>;
+            return [record.path, record.field, record.message].filter((part) => typeof part === "string" && part).join(": ") || "Invalid value";
+          }
+          return String(issue);
+        })
+      : [];
     const message =
       response.status === 404 && path === "/login"
         ? "Admin API login route was not found. Check that ADMIN_API_ORIGIN points to your deployed backend host (without /api/manage), and redeploy the web app."
         : /ADMIN_JWT_SECRET/i.test(apiMessage)
           ? "Admin sign-in is temporarily unavailable because the API is missing a valid signing secret. Set ADMIN_JWT_SECRET in the admin API's application settings to a random value of at least 32 characters, then restart or redeploy the API."
           : (apiMessage || `Request failed (${response.status})`);
-    throw new ApiError(response.status, message, retry > 0 ? retry : undefined);
+    throw new ApiError(response.status, message, retry > 0 ? retry : undefined, issues);
   }
   return payload.data as T;
 }
@@ -181,6 +193,11 @@ export const adminApi = {
   ) => request<Page<Store>>(`/stores?${query(params)}`),
   store: (merchantId: string) =>
     request<StoreDetails>(`/stores/${encodeURIComponent(merchantId)}`),
+  updateStore: (merchantId: string, changes: Record<string, string | number | null>) =>
+    request<StoreDetails>(`/stores/${encodeURIComponent(merchantId)}`, {
+      method: "PATCH",
+      body: changes,
+    }),
   setStoreStatus: (id: string, active: boolean, reason?: string) =>
     request<null>(
       `/stores/${encodeURIComponent(id)}/${active ? "activate" : "suspend"}`,
