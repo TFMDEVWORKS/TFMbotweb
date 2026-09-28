@@ -21,7 +21,36 @@ export type Store = {
   productCount: number;
   orderCount: number;
   createdAt: string;
+  [key: string]: unknown;
 };
+export type Customer = {
+  id: string;
+  name?: string | null;
+  fullName?: string | null;
+  phone?: string | null;
+  phoneNumber?: string | null;
+  whatsappPhone?: string | null;
+  createdAt: string;
+  orderCount: number;
+  totalSpentMinorUnits: number;
+  [key: string]: unknown;
+};
+export type Order = {
+  id: string;
+  orderCode: string;
+  storeName: string;
+  customerName?: string | null;
+  customerPhone: string;
+  status: OrderStatus;
+  totalMinorUnits: number;
+  deliveryFeeMinorUnits?: number;
+  createdAt: string;
+  paidAt?: string | null;
+  [key: string]: unknown;
+};
+export type StoreDetails = Record<string, unknown>;
+export type OrderDetails = Record<string, unknown>;
+export type ReviewData = Record<string, unknown>;
 export type Page<T> = {
   page: number;
   pageSize: number;
@@ -150,16 +179,32 @@ export const adminApi = {
       search?: string;
     } = {},
   ) => request<Page<Store>>(`/stores?${query(params)}`),
+  store: (merchantId: string) =>
+    request<StoreDetails>(`/stores/${encodeURIComponent(merchantId)}`),
   setStoreStatus: (id: string, active: boolean, reason?: string) =>
     request<null>(
       `/stores/${encodeURIComponent(id)}/${active ? "activate" : "suspend"}`,
 
       { method: "POST", ...(active ? {} : { body: { reason } }) },
     ),
+  deleteStore: (id: string) =>
+    request<null>(`/stores/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: { confirmation: "DELETE" },
+    }),
+  customers: (params: { page?: number; pageSize?: number; search?: string } = {}) =>
+    request<Page<Customer>>(`/customers?${query(params)}`),
+  orders: (
+    params: { page?: number; pageSize?: number; status?: OrderStatus; search?: string } = {},
+  ) => request<Page<Order>>(`/orders?${query(params)}`),
+  order: (orderCode: string) =>
+    request<OrderDetails>(`/orders/${encodeURIComponent(orderCode)}`),
+  review: () => request<ReviewData>("/review"),
   exportStores: async () => {
     const response = await fetch(`${BASE}/stores/export?status=ALL`, {
       headers: getToken() ? { authorization: `Bearer ${getToken()}` } : {},
     });
+    if (response.status === 401) setToken(null);
     if (!response.ok)
       throw new ApiError(response.status, "Could not export stores");
     const url = URL.createObjectURL(await response.blob());
